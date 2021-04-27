@@ -1,4 +1,4 @@
--module(prop_handshake).
+-module(prop_rtmp_handshake).
 
 -include_lib("proper/include/proper.hrl").
 -include_lib("../src/rtmp_handshake.hrl").

@@ -11,6 +11,10 @@ decode_c0(<<3, Rest/binary>>) ->
 decode_c0(<<Vsn, _Rest/binary>>) ->
     {error, unknown_version, Vsn}.
 
+-spec encode_s0(integer()) -> binary().
+encode_s0(Version) ->
+    <<Version:8>>.
+
 -spec decode_c1(binary()) -> {ok, #c1{}, binary()} | {error, insufficient_data | bad_format}.
 decode_c1(Bin) when byte_size(Bin) < 1536 ->
     {error, insufficient_data};
@@ -24,10 +28,6 @@ decode_c2(Bin) when byte_size(Bin) < 1536 ->
     {error, insufficient_data};
 decode_c2(<<Time:32, Time2:32, Echo:1528/binary, Rest/binary>>) ->
     {ok, #c2{time = Time, time2 = Time2, random_echo = Echo}, Rest}.
-
--spec encode_s0(integer()) -> binary().
-encode_s0(Version) ->
-    <<Version:8>>.
 
 -spec encode_s1(integer(), binary()) -> binary().
 encode_s1(Time, RandomBytes) ->
