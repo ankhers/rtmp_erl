@@ -23,15 +23,15 @@ decode_c1(<<Time:32, 0:32, RandomBytes:1528/binary, Rest/binary>>) ->
 decode_c1(_Bin) ->
     {error, bad_format}.
 
+-spec encode_s1(integer(), binary()) -> binary().
+encode_s1(Time, RandomBytes) ->
+    <<Time:32, 0:32, RandomBytes/binary>>.
+
 -spec decode_c2(binary()) -> {ok, #c2{}, binary()} | {error, insufficient_data}.
 decode_c2(Bin) when byte_size(Bin) < 1536 ->
     {error, insufficient_data};
 decode_c2(<<Time:32, Time2:32, Echo:1528/binary, Rest/binary>>) ->
     {ok, #c2{time = Time, time2 = Time2, random_echo = Echo}, Rest}.
-
--spec encode_s1(integer(), binary()) -> binary().
-encode_s1(Time, RandomBytes) ->
-    <<Time:32, 0:32, RandomBytes/binary>>.
 
 -spec encode_s2(integer(), integer(), binary()) -> binary().
 encode_s2(Time, Time2, RandomEcho) ->
