@@ -1,4 +1,4 @@
-name: build
+name: ci
 on:
   push:
     branches:
@@ -14,11 +14,11 @@ jobs:
       image: erlang:${{matrix.otp_vsn}}
     strategy:
       matrix:
-        otp_vsn: [18, 19, 20, 21, 22, 23]
+        otp_vsn: [21, 22, 23, 24]
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v2
       - run: rebar3 edoc
-      - run: rebar3 proper -n 10000
+      - run: rebar3 proper
       - run: rebar3 dialyzer
       - run: rebar3 xref
