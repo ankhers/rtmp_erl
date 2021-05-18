@@ -38,3 +38,10 @@
     window_size :: non_neg_integer(),
     limit_type :: hard | soft | dynamic
 }).
+
+-record(rtmp_header, {
+    message_type :: non_neg_integer(),
+    payload_length :: non_neg_integer(),
+    timestamp :: non_neg_integer(),
+    stream_id :: non_neg_integer()
+}).

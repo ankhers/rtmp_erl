@@ -32,6 +32,13 @@ prop_decode_control_message() ->
         {Msg, <<>>} == rtmp_chunk:decode_chunk_data(2, Type, Bin)
     ).
 
+prop_decode_rtmp_header() ->
+    ?FORALL(
+        {Bin, Type, Header},
+        rtmp_header(),
+        {Header, <<>>} == rtmp_chunk:decode_chunk_data(1, Type, Bin)
+    ).
+
 %%%%%%%%%%%%%%%
 %%% Helpers %%%
 %%%%%%%%%%%%%%%
@@ -84,6 +91,9 @@ encode_set_peer_bandwidth(AckWinSize, LimitType) ->
 limit_type(0) -> hard;
 limit_type(1) -> soft;
 limit_type(2) -> dynamic.
+
+encode_rtmp_header(MsgType, PayloadLen, Timestamp, StreamId) ->
+    <<MsgType:8, PayloadLen:24, Timestamp:32, StreamId:24>>.
 
 %%%%%%%%%%%%%%%%%%
 %%% Generators %%%
@@ -238,4 +248,17 @@ set_peer_bandwidth() ->
                 message_stream_id = 0
             },
             #set_peer_bandwidth{window_size = AckWinSize, limit_type = limit_type(LimitType)}}
+    ).
+
+%% Bin Type Header
+rtmp_header() ->
+    ?LET(
+        {Type, MsgType, PayloadLen, Timestamp, StreamId},
+        {message_header(), byte(), non_neg_integer(), timestamp(), non_neg_integer()},
+        {encode_rtmp_header(MsgType, PayloadLen, Timestamp, StreamId), Type, #rtmp_header{
+            message_type = MsgType,
+            payload_length = PayloadLen,
+            timestamp = Timestamp,
+            stream_id = StreamId
+        }}
     ).

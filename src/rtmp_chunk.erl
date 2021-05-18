@@ -1,6 +1,6 @@
 -module(rtmp_chunk).
 
--export([decode_basic_header/1, decode_message_header/3, decode_chunk_data/3]).
+-export([decode_basic_header/1, decode_message_header/3, decode_chunk_data/3, retrieve_payload/2]).
 
 -include("rtmp_chunk.hrl").
 
@@ -55,12 +55,13 @@ maybe_extended_timestamp(Timestamp, Rest) ->
     {Timestamp, Rest}.
 
 -spec decode_chunk_data(chunk_stream_id(), header_type(), binary()) ->
-    {control_message(), binary()}.
+    {control_message() | #rtmp_header{}, binary()}.
 decode_chunk_data(2, #type0{message_stream_id = 0, message_type_id = MsgTypeId}, Bin) ->
     decode_control_message(MsgTypeId, Bin);
 decode_chunk_data(ChunkStreamId, HeaderType, Bin) ->
-    {foo, Bin}.
+    decode_rtmp_message_header(Bin).
 
+-spec decode_control_message(message_type_id(), binary()) -> {control_message(), binary()}.
 decode_control_message(1, <<0:1, ChunkSize:31, Rest/binary>>) ->
     {#set_chunk_size{size = min(16#FFFFFF, ChunkSize)}, Rest};
 decode_control_message(2, <<ChunkStreamId:32, Rest/binary>>) ->
@@ -71,6 +72,24 @@ decode_control_message(5, <<AckWindowSize:32, Rest/binary>>) ->
     {#window_acknowledgement_size{window_size = AckWindowSize}, Rest};
 decode_control_message(6, <<AckWindowSize:32, LimitType, Rest/binary>>) ->
     {#set_peer_bandwidth{window_size = AckWindowSize, limit_type = limit_type(LimitType)}, Rest}.
+
+-spec decode_rtmp_message_header(binary()) -> {#rtmp_header{}, binary()}.
+decode_rtmp_message_header(<<MsgType:8, PayloadLen:24, Timestamp:32, StreamId:24, Rest/binary>>) ->
+    {#rtmp_header{
+            message_type = MsgType,
+            payload_length = PayloadLen,
+            timestamp = Timestamp,
+            stream_id = StreamId
+        },
+        Rest}.
+
+-spec retrieve_payload(non_neg_integer(), binary()) ->
+    {ok, binary(), binary()} | {error, insufficient_data}.
+retrieve_payload(Len, Bin) when bit_size(Bin) >= Len ->
+    <<Payload:Len/binary, Rest/binary>> = Bin,
+    {ok, Payload, Rest};
+retrieve_payload(_Len, _Bin) ->
+    {error, insufficient_data}.
 
 limit_type(0) -> hard;
 limit_type(1) -> soft;
