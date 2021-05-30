@@ -2,7 +2,7 @@
 
 -include_lib("proper/include/proper.hrl").
 
--include("../src/rtmp_chunk.hrl").
+-include("../include/rtmp_chunk.hrl").
 
 %%%%%%%%%%%%%%%%%%
 %%% Properties %%%

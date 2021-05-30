@@ -1,89 +1,120 @@
 -module(rtmp_chunk).
 
--export([decode_basic_header/1, decode_message_header/3, decode_chunk_data/3, retrieve_payload/2]).
+-export([
+    decode_basic_header/1,
+    decode_message_header/3,
+    decode_control_message/2,
+    decode_rtmp_message_header/1,
+    retrieve_payload/2
+]).
 
--include("rtmp_chunk.hrl").
+-include("../include/rtmp_chunk.hrl").
 
--type header_type() :: #type0{} | #type1{} | #type2{} | #type3{}.
-
--type control_message() ::
-    #set_chunk_size{}
-    | #abort{}
-    | #acknowledgement{}
-    | #window_acknowledgement_size{}
-    | #set_peer_bandwidth{}.
-
--spec decode_basic_header(binary()) -> {format(), chunk_stream_id(), binary()}.
+-spec decode_basic_header(binary()) ->
+    {ok, format(), chunk_stream_id(), binary()} | {error, insufficient_data}.
 decode_basic_header(<<Fmt:2, 0:6, CsId, Rest/binary>>) ->
-    {Fmt, CsId + 64, Rest};
+    {ok, Fmt, CsId + 64, Rest};
 decode_basic_header(<<Fmt:2, 1:6, CsId:16, Rest/binary>>) ->
-    {Fmt, CsId + 64, Rest};
+    {ok, Fmt, CsId + 64, Rest};
 decode_basic_header(<<Fmt:2, CsId:6, Rest/binary>>) ->
-    {Fmt, CsId, Rest}.
+    {ok, Fmt, CsId, Rest};
+decode_basic_header(_Bin) ->
+    {error, insufficient_data}.
 
--spec decode_message_header(format(), boolean(), binary()) -> {header_type(), binary()}.
+-spec decode_message_header(format(), boolean(), binary()) ->
+    {ok, header_type(), binary()} | {error, insufficient_data}.
 decode_message_header(
     0,
     _ETS,
     <<Timestamp0:24, MsgLen:24, MsgTypeId, MsgStreamId:32, Rest0/binary>>
 ) ->
-    {Timestamp, Rest} = maybe_extended_timestamp(Timestamp0, Rest0),
-    {#type0{
-            timestamp = Timestamp,
-            message_length = MsgLen,
-            message_type_id = MsgTypeId,
-            message_stream_id = MsgStreamId
-        },
-        Rest};
+    case maybe_extended_timestamp(Timestamp0, Rest0) of
+        {ok, Timestamp, Rest} ->
+            {ok,
+                #type0{
+                    timestamp = Timestamp,
+                    message_length = MsgLen,
+                    message_type_id = MsgTypeId,
+                    message_stream_id = MsgStreamId
+                },
+                Rest};
+        {error, insufficient_data} = Err ->
+            Err
+    end;
 decode_message_header(1, _ETS, <<TimestampDelta0:24, MsgLen:24, MsgTypeId, Rest0/binary>>) ->
-    {TimestampDelta, Rest} = maybe_extended_timestamp(TimestampDelta0, Rest0),
-    {#type1{timestamp_delta = TimestampDelta, message_length = MsgLen, message_type_id = MsgTypeId},
-        Rest};
+    case maybe_extended_timestamp(TimestampDelta0, Rest0) of
+        {ok, TimestampDelta, Rest} ->
+            {ok,
+                #type1{
+                    timestamp_delta = TimestampDelta,
+                    message_length = MsgLen,
+                    message_type_id = MsgTypeId
+                },
+                Rest};
+        {error, insufficient_data} = Err ->
+            Err
+    end;
 decode_message_header(2, _ETS, <<TimestampDelta0:24, Rest0/binary>>) ->
-    {TimestampDelta, Rest} = maybe_extended_timestamp(TimestampDelta0, Rest0),
-    {#type2{timestamp_delta = TimestampDelta}, Rest};
+    case maybe_extended_timestamp(TimestampDelta0, Rest0) of
+        {ok, TimestampDelta, Rest} ->
+            {ok, #type2{timestamp_delta = TimestampDelta}, Rest};
+        {error, insufficient_data} = Err ->
+            Err
+    end;
 decode_message_header(3, true, <<Timestamp:32, Rest/binary>>) ->
-    {#type3{extended_timestamp = Timestamp}, Rest};
+    {ok, #type3{extended_timestamp = Timestamp}, Rest};
 decode_message_header(3, false, Rest) ->
-    {#type3{extended_timestamp = nil}, Rest}.
+    {ok, #type3{extended_timestamp = nil}, Rest};
+decode_message_header(_, _, _Bin) ->
+    {error, insufficient_data}.
 
 -spec maybe_extended_timestamp(timestamp() | timestamp_delta(), binary()) ->
-    {timestamp() | timestamp_delta(), binary()}.
+    {ok, timestamp() | timestamp_delta(), binary()} | {error, insufficient_data}.
 maybe_extended_timestamp(16#FFFFFF, <<FullTimestamp:32, Rest/binary>>) ->
-    {FullTimestamp, Rest};
+    {ok, FullTimestamp, Rest};
+maybe_extended_timestamp(16#FFFFFF, _Bin) ->
+    {error, insufficient_data};
 maybe_extended_timestamp(Timestamp, Rest) ->
-    {Timestamp, Rest}.
+    {ok, Timestamp, Rest}.
 
--spec decode_chunk_data(chunk_stream_id(), header_type(), binary()) ->
-    {control_message() | #rtmp_header{}, binary()}.
-decode_chunk_data(2, #type0{message_stream_id = 0, message_type_id = MsgTypeId}, Bin) ->
-    decode_control_message(MsgTypeId, Bin);
-decode_chunk_data(ChunkStreamId, HeaderType, Bin) ->
-    decode_rtmp_message_header(Bin).
+%% -spec decode_chunk_data(chunk_stream_id(), header_type(), binary()) ->
+%%     {ok, control_message() | #rtmp_header{}, binary()} | {error, insufficient_data}.
+%% decode_chunk_data(2, #type0{message_stream_id = 0, message_type_id = MsgTypeId}, Bin) ->
+%%     decode_control_message(MsgTypeId, Bin);
+%% decode_chunk_data(_ChunkStreamId, _HeaderType, Bin) ->
+%%     decode_rtmp_message_header(Bin).
 
--spec decode_control_message(message_type_id(), binary()) -> {control_message(), binary()}.
+-spec decode_control_message(message_type_id(), binary()) ->
+    {ok, control_message(), binary()} | {error, insufficient_data}.
 decode_control_message(1, <<0:1, ChunkSize:31, Rest/binary>>) ->
-    {#set_chunk_size{size = min(16#FFFFFF, ChunkSize)}, Rest};
+    {ok, #set_chunk_size{size = min(16#FFFFFF, ChunkSize)}, Rest};
+decode_control_message(1, <<0:1, _Rest/binary>>) ->
+    {error, insufficient_data};
 decode_control_message(2, <<ChunkStreamId:32, Rest/binary>>) ->
-    {#abort{chunk_stream_id = ChunkStreamId}, Rest};
+    {ok, #abort{chunk_stream_id = ChunkStreamId}, Rest};
 decode_control_message(3, <<SequenceNumber:32, Rest/binary>>) ->
-    {#acknowledgement{sequence_number = SequenceNumber}, Rest};
+    {ok, #acknowledgement{sequence_number = SequenceNumber}, Rest};
 decode_control_message(5, <<AckWindowSize:32, Rest/binary>>) ->
-    {#window_acknowledgement_size{window_size = AckWindowSize}, Rest};
+    {ok, #window_acknowledgement_size{window_size = AckWindowSize}, Rest};
 decode_control_message(6, <<AckWindowSize:32, LimitType, Rest/binary>>) ->
-    {#set_peer_bandwidth{window_size = AckWindowSize, limit_type = limit_type(LimitType)}, Rest}.
+    {ok, #set_peer_bandwidth{window_size = AckWindowSize, limit_type = limit_type(LimitType)},
+        Rest}.
 
--spec decode_rtmp_message_header(binary()) -> {#rtmp_header{}, binary()}.
+-spec decode_rtmp_message_header(binary()) ->
+    {ok, #rtmp_header{}, binary()} | {error, insufficient_data}.
 decode_rtmp_message_header(<<MsgType:8, PayloadLen:24, Timestamp:32, StreamId:24, Rest/binary>>) ->
-    {#rtmp_header{
+    {ok,
+        #rtmp_header{
             message_type = MsgType,
             payload_length = PayloadLen,
             timestamp = Timestamp,
             stream_id = StreamId
         },
-        Rest}.
+        Rest};
+decode_rtmp_message_header(_Bin) ->
+    {error, insufficient_data}.
 
--spec retrieve_payload(non_neg_integer(), binary()) ->
+-spec retrieve_payload(pos_integer(), binary()) ->
     {ok, binary(), binary()} | {error, insufficient_data}.
 retrieve_payload(Len, Bin) when bit_size(Bin) >= Len ->
     <<Payload:Len/binary, Rest/binary>> = Bin,

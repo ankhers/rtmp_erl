@@ -45,3 +45,12 @@
     timestamp :: non_neg_integer(),
     stream_id :: non_neg_integer()
 }).
+
+-type header_type() :: #type0{} | #type1{} | #type2{} | #type3{}.
+
+-type control_message() ::
+    #set_chunk_size{}
+    | #abort{}
+    | #acknowledgement{}
+    | #window_acknowledgement_size{}
+    | #set_peer_bandwidth{}.

@@ -3,13 +3,16 @@
 -export([decode_c0/1, decode_c1/1, decode_c2/1]).
 -export([encode_s0/1, encode_s1/2, encode_s2/3]).
 
--include("rtmp_handshake.hrl").
+-include("../include/rtmp_handshake.hrl").
 
--spec decode_c0(binary()) -> {ok, #c0{}, binary} | {error, unknown_version, integer()}.
+-spec decode_c0(binary()) ->
+    {ok, #c0{}, binary()} | {error, unknown_version, integer()} | {error, insufficient_data}.
 decode_c0(<<3, Rest/binary>>) ->
     {ok, #c0{version = 3}, Rest};
-decode_c0(<<Vsn, _Rest/binary>>) ->
-    {error, unknown_version, Vsn}.
+decode_c0(<<Vsn/integer, _Rest/binary>>) ->
+    {error, unknown_version, Vsn};
+decode_c0(_Bin) ->
+    {error, insufficient_data}.
 
 -spec encode_s0(integer()) -> binary().
 encode_s0(Version) ->
