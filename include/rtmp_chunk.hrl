@@ -23,7 +23,7 @@
     timestamp_delta :: timestamp_delta()
 }).
 
--record(type3, {extended_timestamp :: timestamp() | nil}).
+-record(type3, {}).
 
 %% Protocol Control Messages
 -record(set_chunk_size, {size :: non_neg_integer()}).
