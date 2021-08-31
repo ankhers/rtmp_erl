@@ -150,18 +150,7 @@ t2() ->
     ).
 
 t3() ->
-    ?LET(
-        {Timestamp, ETS},
-        {extended_timestamp(), boolean()},
-        begin
-            TS =
-                if
-                    ETS -> Timestamp;
-                    true -> nil
-                end,
-            {encode_t3(Timestamp, ETS), ETS, 3, #type3{extended_timestamp = TS}}
-        end
-    ).
+    #type3{}.
 
 timestamp() -> oneof([simple_timestamp(), extended_timestamp()]).
 
