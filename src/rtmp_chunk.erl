@@ -1,5 +1,7 @@
 -module(rtmp_chunk).
 
+-export([encode_chunk_header/3]).
+
 -export([
     decode_format/1,
     decode_chunk_stream_id/2,
@@ -9,6 +11,41 @@
 ]).
 
 -include("../include/rtmp_chunk.hrl").
+
+encode_chunk_header(Fmt, CsId, Header) ->
+    RawBasicHeader = encode_basic_header(Fmt, CsId),
+    RawMessageHeader = encode_chunk_message_header(Header),
+    <<RawBasicHeader/binary, RawMessageHeader/binary>>.
+
+encode_basic_header(Fmt, CsId) when CsId < 64 ->
+    <<Fmt:2, CsId:6>>;
+encode_basic_header(Fmt, CsId) ->
+    Id = CsId - 64,
+
+    Buffer =
+        case CsId < 320 of
+            true ->
+                0;
+            _ ->
+                1
+        end,
+
+    <<Fmt:2, Buffer:6, Id>>.
+
+encode_chunk_message_header(#type0{
+    timestamp = FullTimestamp,
+    message_length = MsgLen,
+    message_type_id = MsgTypeId,
+    message_stream_id = MsgStreamId
+}) ->
+    {Timestamp, ExtendedTimestamp} = case FullTimestamp >= 16#FFFFFF of
+        true ->
+            {16#FFFFFF, <<FullTimestamp:32>>};
+        _ ->
+            {FullTimestamp, <<>>}
+    end,
+
+    <<Timestamp:24, MsgLen:24, MsgTypeId, MsgStreamId:32, ExtendedTimestamp/binary>>.
 
 -spec decode_format(binary()) -> {ok, format(), non_neg_integer(), binary()}.
 decode_format(<<Fmt:2, N:6, Rest/binary>>) ->

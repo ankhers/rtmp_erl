@@ -10,8 +10,11 @@
     rw_mod :: module(),
     rw :: any(),
 
+    epoch :: non_neg_integer(),
+
     %% Number of bytes
-    chunk_size :: pos_integer(),
+    client_chunk_size :: pos_integer(),
+    server_chunk_size :: pos_integer(),
 
     message_headers :: #{chunk_stream_id() => header_type()},
     data :: #{chunk_stream_id() => binary()}
@@ -22,7 +25,18 @@ start_link(RWMod, RW) ->
     {ok, Pid}.
 
 init(RWMod, RW) ->
-    State = #state{rw_mod = RWMod, rw = RW, chunk_size = 128, message_headers = #{}, data = #{}},
+    State = #state{
+        rw_mod = RWMod,
+        rw = RW,
+
+        epoch = os:system_time(),
+
+        client_chunk_size = 128,
+        server_chunk_size = 128,
+
+        message_headers = #{},
+        data = #{}
+    },
 
     authenticate(State).
 
@@ -40,7 +54,7 @@ init(RWMod, RW) ->
 %% as well as its own timestamp and random data to be echoed back
 %%
 %% Finally the client and the server will echo back the data it received in the second message
-authenticate(#state{rw_mod = RWMod, rw = RW} = State) ->
+authenticate(#state{rw_mod = RWMod, rw = RW, epoch = Epoch} = State) ->
     {ok, RawC0} = RWMod:recv(RW, 1, 5000),
     {ok, C0, <<>>} = rtmp_handshake:decode_c0(RawC0),
 
@@ -50,7 +64,7 @@ authenticate(#state{rw_mod = RWMod, rw = RW} = State) ->
     S0 = rtmp_handshake:encode_s0(C0#c0.version),
     %% RandomBytes = crypto:strong_rand_bytes(1528),
     %% S1 = rtmp_handshake:encode_s1(os:system_time(), RandomBytes),
-    S1 = rtmp_handshake:encode_s1(os:system_time(), C1#c1.random_bytes),
+    S1 = rtmp_handshake:encode_s1(os:system_time() - Epoch, C1#c1.random_bytes),
     S2 = rtmp_handshake:encode_s2(C1#c1.time, 0, C1#c1.random_bytes),
 
     RWMod:send(RW, [S0, S1, S2]),
@@ -94,7 +108,7 @@ chunk_header(#state{message_headers = MessageHeaders} = State) ->
 chunk_data(
     CsId,
     #type0{message_length = ML} = Header,
-    #state{rw_mod = RWMod, rw = RW, chunk_size = ChunkSize, data = Data} = State
+    #state{rw_mod = RWMod, rw = RW, client_chunk_size = ChunkSize, data = Data} = State
 ) ->
     CurrentData = maps:get(CsId, Data, <<>>),
     NumBytes = min(ChunkSize, ML - byte_size(CurrentData)),
@@ -118,12 +132,40 @@ chunk_data(
     end.
 
 control_message(RawChunkData, Header, State) ->
-    {ok, CtrlMsg, <<>>} = rtmp_chunk:decode_control_message(Header#type0.message_type_id, RawChunkData),
+    {ok, CtrlMsg, <<>>} = rtmp_chunk:decode_control_message(
+        Header#type0.message_type_id, RawChunkData
+    ),
 
     chunk_header(handle_control_message(CtrlMsg, State)).
 
 command(RawChunkData, Header, State) ->
-    ok.
+    AmfMod = amf_module(Header),
+
+    {ok, Cmd, CmdRest} = AmfMod:decode(RawChunkData),
+
+    case Cmd of
+        <<"connect">> ->
+            connect(AmfMod, CmdRest, State)
+    end.
+
+%% TODO: I'm really not sure what I want/need to do with this informatino...
+connect(AmfMod, ConnectData, #state{epoch = Epoch} = State) ->
+    {ok, 1.0, TransactionIDRest} = AmfMod:decode(ConnectData),
+    {ok, ObjectData, ObjectDataRest} = AmfMod:decode(TransactionIDRest),
+    io:format("Object Data: ~p~n", [ObjectData]),
+    io:format("Rest: ~p~n", [ObjectDataRest]),
+
+    CommandName = AmfMod:encode(<<"_result">>),
+    TransactionID = AmfMod:encode(1),
+    Properties = AmfMod:encode({amf0_object, #{}}),
+    Information = AmfMod:encode({amf0_object, #{}}),
+
+    %% TODO: Send the Stream Begin message before sending this payload
+    Payload = <<CommandName/binary, TransactionID/binary, Properties/binary, Information/binary>>,
+
+    send_payload(Payload, 3, os:system_time() - Epoch, 1, 1, State),
+
+    chunk_header(State).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%                                                                            %%
@@ -183,5 +225,44 @@ message_kind(3, #type0{message_stream_id = 0}) ->
     command.
 
 handle_control_message(#set_chunk_size{size = Size}, State) ->
-    io:format("SetChunkSize: ~p~n", [Size]),
-    State#state{chunk_size = Size}.
+    State#state{client_chunk_size = Size}.
+
+amf_module(#type0{message_type_id = N}) when N == 20 orelse N == 18 orelse N == 19 ->
+    amf0;
+amf_module(#type0{message_type_id = N}) when N == 17 orelse N == 15 orelse N == 16 ->
+    amf3.
+
+send_payload(
+    Data,
+    CsId,
+    Timestamp,
+    MT,
+    MS,
+    #state{rw_mod = RWMod, rw = RW, epoch = Epoch, server_chunk_size = ChunkSize} = State
+) ->
+    Header = #type0{
+        timestamp = Timestamp - Epoch,
+        message_length = byte_size(Data),
+        message_type_id = MT,
+        message_stream_id = MS
+    },
+    RawHeader = rtmp_chunk:encode_chunk_header(0, CsId, Header),
+    RWMod:send(RW, RawHeader),
+    io:format("Payload Size: ~p~n", [byte_size(Data)]),
+    do_send_payload(Data, ChunkSize, RWMod, RW, false).
+
+do_send_payload(<<>>, _, _, _, _) ->
+    ok;
+do_send_payload(Data, ChunkSize, RWMod, RW, More) ->
+    Header =
+        case More of
+            true ->
+                rtmp_chunk:encode_chunk_header(3, 1, #type3{});
+            _ ->
+                <<>>
+        end,
+
+    NumBytes = min(byte_size(Data), ChunkSize),
+    <<RawData:NumBytes/binary, Rest/binary>> = Data,
+    RWMod:send(RW, [Header, RawData]),
+    do_send_payload(Rest, ChunkSize, RWMod, RW, true).
