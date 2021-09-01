@@ -1,7 +1,11 @@
 -module(rtmp_chunk).
 
 -export([
-    decode_format/1, decode_chunk_stream_id/2, decode_message_header/2, decode_extended_timestamp/2
+    decode_format/1,
+    decode_chunk_stream_id/2,
+    decode_message_header/2,
+    decode_extended_timestamp/2,
+    decode_control_message/2
 ]).
 
 -include("../include/rtmp_chunk.hrl").
@@ -122,21 +126,21 @@ decode_extended_timestamp(Timestamp, Rest) ->
 %% %% decode_chunk_data(_ChunkStreamId, _HeaderType, Bin) ->
 %% %%     decode_rtmp_message_header(Bin).
 
-%% -spec decode_control_message(message_type_id(), binary()) ->
-%%     {ok, control_message(), binary()} | {error, insufficient_data}.
-%% decode_control_message(1, <<0:1, ChunkSize:31, Rest/binary>>) ->
-%%     {ok, #set_chunk_size{size = min(16#FFFFFF, ChunkSize)}, Rest};
-%% decode_control_message(1, <<0:1, _Rest/binary>>) ->
-%%     {error, insufficient_data};
-%% decode_control_message(2, <<ChunkStreamId:32, Rest/binary>>) ->
-%%     {ok, #abort{chunk_stream_id = ChunkStreamId}, Rest};
-%% decode_control_message(3, <<SequenceNumber:32, Rest/binary>>) ->
-%%     {ok, #acknowledgement{sequence_number = SequenceNumber}, Rest};
-%% decode_control_message(5, <<AckWindowSize:32, Rest/binary>>) ->
-%%     {ok, #window_acknowledgement_size{window_size = AckWindowSize}, Rest};
-%% decode_control_message(6, <<AckWindowSize:32, LimitType, Rest/binary>>) ->
-%%     {ok, #set_peer_bandwidth{window_size = AckWindowSize, limit_type = limit_type(LimitType)},
-%%         Rest}.
+-spec decode_control_message(message_type_id(), binary()) ->
+    {ok, control_message(), binary()} | {error, insufficient_data}.
+decode_control_message(1, <<0:1, ChunkSize:31, Rest/binary>>) ->
+    {ok, #set_chunk_size{size = min(16#FFFFFF, ChunkSize)}, Rest};
+decode_control_message(1, <<0:1, _Rest/binary>>) ->
+    {error, insufficient_data};
+decode_control_message(2, <<ChunkStreamId:32, Rest/binary>>) ->
+    {ok, #abort{chunk_stream_id = ChunkStreamId}, Rest};
+decode_control_message(3, <<SequenceNumber:32, Rest/binary>>) ->
+    {ok, #acknowledgement{sequence_number = SequenceNumber}, Rest};
+decode_control_message(5, <<AckWindowSize:32, Rest/binary>>) ->
+    {ok, #window_acknowledgement_size{window_size = AckWindowSize}, Rest};
+decode_control_message(6, <<AckWindowSize:32, LimitType, Rest/binary>>) ->
+    {ok, #set_peer_bandwidth{window_size = AckWindowSize, limit_type = limit_type(LimitType)},
+        Rest}.
 
 %% -spec encode_control_message(control_message()) -> binary().
 %% encode_control_message(#set_chunk_size{size = Size}) ->
@@ -173,9 +177,9 @@ decode_extended_timestamp(Timestamp, Rest) ->
 %% retrieve_payload(_Len, _Bin) ->
 %%     {error, insufficient_data}.
 
-%% limit_type(0) -> hard;
-%% limit_type(1) -> soft;
-%% limit_type(2) -> dynamic;
-%% limit_type(hard) -> 0;
-%% limit_type(soft) -> 1;
-%% limit_type(dynamic) -> 2.
+limit_type(0) -> hard;
+limit_type(1) -> soft;
+limit_type(2) -> dynamic;
+limit_type(hard) -> 0;
+limit_type(soft) -> 1;
+limit_type(dynamic) -> 2.
